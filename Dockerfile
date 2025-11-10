@@ -12,8 +12,7 @@ RUN apk add --no-cache \
 
 # Configure git for AWS CodeCommit
 # UseHttpPath is required for CodeCommit authentication
-RUN git config --global credential.UseHttpPath true
-
-# Note: credential.helper will be configured at runtime with actual AWS credentials
-# This ensures git is ready to use AWS CodeCommit credential helper
+# Credential helper uses AWS CLI which reads credentials from environment variables at runtime
+RUN git config --global credential.helper '!aws codecommit credential-helper $@' && \
+    git config --global credential.UseHttpPath true
 
