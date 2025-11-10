@@ -1,0 +1,64 @@
+name: Check Source Image Updates
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current source image digest
+        id: current-digest
+        run: |
+          CURRENT_DIGEST=$(docker manifest inspect composer/satis:latest | jq -r '.config.digest')
+          echo "current_digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
+          echo "Current digest: $CURRENT_DIGEST"
+
+      - name: Get stored source image digest
+        id: stored-digest
+        run: |
+          if [ -f .source-image-digest ]; then
+            STORED_DIGEST=$(cat .source-image-digest)
+            echo "stored_digest=$STORED_DIGEST" >> $GITHUB_OUTPUT
+            echo "Stored digest: $STORED_DIGEST"
+          else
+            echo "stored_digest=" >> $GITHUB_OUTPUT
+            echo "No stored digest found"
+          fi
+
+      - name: Compare digests and trigger rebuild
+        if: steps.current-digest.outputs.current_digest != steps.stored-digest.outputs.stored_digest
+        run: |
+          echo "Source image has been updated! Triggering rebuild..."
+          echo "${{ steps.current-digest.outputs.current_digest }}" > .source-image-digest
+          
+          # Trigger the build workflow
+          gh workflow run build-and-push.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update stored digest
+        if: steps.current-digest.outputs.current_digest != steps.stored-digest.outputs.stored_digest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .source-image-digest
+          git commit -m "Update source image digest" || exit 0
+          git push || exit 0
+
+      - name: No updates found
+        if: steps.current-digest.outputs.current_digest == steps.stored-digest.outputs.stored_digest
+        run: |
+          echo "Source image has not been updated. No rebuild needed."
+
