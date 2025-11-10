@@ -34,12 +34,39 @@ docker run --rm \
 
 The image is configured to work with AWS CodeCommit repositories. Ensure you have:
 - AWS credentials set via environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`)
-- Git configured to use AWS CodeCommit credential helper (configured at runtime)
+- Git configured to use AWS CodeCommit credential helper (required when running as non-root user)
+- Repositories in `satis.json` configured with `"type": "git"` (not `"type": "vcs"`)
 
-Example:
+**Important Notes:**
+- The Dockerfile pre-configures git for root user, but when running as a non-root user (`--user`), you need to configure git at runtime
+- Set `HOME=/build/.docker-home` environment variable so the non-root user has a writable home directory for git config
+- Set `COMPOSER_HOME=/build/.docker-home/.composer` so Composer can create its cache directory
+- CodeCommit repositories must be explicitly set as `"type": "git"` in satis.json to prevent Composer from using SvnDriver
+- The `.docker-home` directory will be created in your project directory (where you mount `/build`)
+
+Example with non-root user:
 ```bash
 docker run --rm \
   --user $(id -u):$(id -g) \
+  -v $(pwd):/build \
+  -w /build \
+  -e HOME=/build/.docker-home \
+  -e COMPOSER_HOME=/build/.docker-home/.composer \
+  -e AWS_ACCESS_KEY_ID=your-access-key \
+  -e AWS_SECRET_ACCESS_KEY=your-secret-key \
+  -e COMPOSER_AUTH='{"github-oauth":{"github.com":"your-token"}}' \
+  ghcr.io/monolight/satis-aws:latest \
+  sh -c "mkdir -p /build/.docker-home && \
+         git config --global credential.helper '!aws codecommit credential-helper $@' && \
+         git config --global credential.UseHttpPath true && \
+         /satis/bin/satis build satis.json output"
+```
+
+**Note:** When using `sh -c`, you must use the full path `/satis/bin/satis` because the entrypoint script (which normally handles `satis` commands) is bypassed. When running as root without `sh -c`, you can use `satis` directly as the entrypoint will handle it.
+
+Example as root (simpler, but less secure):
+```bash
+docker run --rm \
   -v $(pwd):/build \
   -w /build \
   -e AWS_ACCESS_KEY_ID=your-access-key \
@@ -47,23 +74,6 @@ docker run --rm \
   -e COMPOSER_AUTH='{"github-oauth":{"github.com":"your-token"}}' \
   ghcr.io/monolight/satis-aws:latest \
   build satis.json output
-```
-
-### Configure Git for CodeCommit
-
-When running the container, configure git to use AWS CodeCommit credential helper:
-
-```bash
-docker run --rm \
-  --user $(id -u):$(id -g) \
-  -v $(pwd):/build \
-  -w /build \
-  -e AWS_ACCESS_KEY_ID=your-access-key \
-  -e AWS_SECRET_ACCESS_KEY=your-secret-key \
-  ghcr.io/monolight/satis-aws:latest \
-  sh -c "git config --global credential.helper '!aws codecommit credential-helper $@' && \
-         git config --global credential.UseHttpPath true && \
-         satis build satis.json output"
 ```
 
 ## Building the Image
@@ -97,4 +107,8 @@ The repository includes a GitHub Actions workflow that:
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
+
+## Responsible Disclosure
+
+This project was generated mostly by AI under human supervision. While efforts have been made to ensure correctness and security, please review the code carefully before use in production environments. If you discover any bugs, security issues, or vulnerabilities, please report them responsibly through the project's issue tracker.
 
